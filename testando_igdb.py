@@ -22,24 +22,27 @@ def get_token_twitch():
 
 def search_game(nome: str):
     token = get_token_twitch()
-
+    
     url_igdb = "https://api.igdb.com/v4/games"
     headers = {
         "Client-ID": CLIENT_ID,
         "Authorization": f"Bearer {token}",
         "Accept": "application/json"
     }
-
+    
     query = f"""
-        search "{nome};
-        field name, cover.url, platforms.name, first_release_date, game_type;
+        search "{nome}";
+        fields name, cover.url, platforms.name, first_release_date, game_type;
         where game_type = 0;
         limit 5;
     """
 
-    response = httpx.post(url_igdb, headers=headers, data=query)
-    response.raise_for_status()
-
+    response = httpx.post(url_igdb, headers=headers, content=query)
+    
+    if response.status_code != 200:
+        print(f"\n[ERRO DETALHADO DA IGDB]: {response.text}\n")
+        response.raise_for_status()
+    
     return response.json()
 
 if __name__ == "__main__":
