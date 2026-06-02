@@ -32,7 +32,7 @@ def get_db():
         yield db
     finally:
         db.close()
-        
+
 class GameResponse(BaseModel):
     id: int
     name: str
@@ -149,3 +149,9 @@ def save_game(game: GameCreate, db: Session = Depends(get_db)):
     db.refresh(new_game)
     
     return {"message": "Jogo guardado com sucesso!", "game_id": new_game.id}
+
+@app.get("/api/games")
+def get_my_games(db: Session = Depends(get_db)):
+    """Retorna todos os jogos salvos na coleção local."""
+    jogos = db.query(models.Game).all()
+    return jogos
