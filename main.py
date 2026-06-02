@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import models
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
@@ -17,19 +18,47 @@ CLIENT_SECRET = os.getenv("IGDB_CLIENT_SECRET")
 app = FastAPI(title="Game Collector API", version="1.0")
 models.Base.metadata.create_all(bind=engine)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
+        
 class GameResponse(BaseModel):
     id: int
     name: str
     cover_url: Optional[str] = None
     release_date: Optional[str] = None
     platforms: List[str] = []
+
+    @classmethod
+    def from_igdb(cls, data: dict):
+        cover = None
+        if "cover" in data and "url" in data["cover"]:
+            cover = "https:" + data["cover"]["url"].replace("t_thumb", "t_cover_big")
+        
+        release = None
+        if "first_release_date" in data:
+            release = datetime.fromtimestamp(data["first_release_date"]).strftime("%Y-%m-%d")
+            
+        plats = [p["name"] for p in data.get("platforms", [])]
+
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            cover_url=cover,
+            release_date=release,
+            platforms=plats
+        )
 
 class GameCreate(BaseModel):
     igdb_id: int
@@ -94,7 +123,9 @@ def search_games(query: str):
         return clean_game_data
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
     
 @app.post("/api/games")
 def save_game(game: GameCreate, db: Session = Depends(get_db)):
