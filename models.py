@@ -5,7 +5,7 @@ class Game(Base):
     __tablename__ = "games"
 
     id = Column(Integer, primary_key=True, index=True)
-    igdb_id = Column(Integer, unique=True, index=True)
+    igdb_id = Column(Integer, index=True)
     title = Column(String, index=True)
     cover_url = Column(String, nullable=True)
     release_date = Column(String, nullable=True)

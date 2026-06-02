@@ -127,12 +127,18 @@ def search_games(query: str):
             import traceback
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
-    
+
 @app.post("/api/games")
 def save_game(game: GameCreate, db: Session = Depends(get_db)):
-    db_game = db.query(models.Game).filter(models.Game.igdb_id == game.igdb_id).first()
+
+    db_game = db.query(models.Game).filter(
+        models.Game.igdb_id == game.igdb_id,
+        models.Game.media_platform == game.media_platform,
+        models.Game.edition == game.edition
+    ).first()
+    
     if db_game:
-        raise HTTPException(status_code=400, detail="Este jogo já está no seu catálogo.")
+        raise HTTPException(status_code=400, detail="Esta edição/plataforma já está cadastrada.")
     
     plataformas_str = ",".join(game.platforms) if game.platforms else ""
     
