@@ -5,6 +5,9 @@ from datetime import datetime
 import httpx
 import os
 from dotenv import load_dotenv
+import models
+from database import engine, SessionLocal
+from sqlalchemy.orm import Session
 
 load_dotenv()
 
@@ -12,6 +15,14 @@ CLIENT_ID = os.getenv("IGDB_CLIENT_ID")
 CLIENT_SECRET = os.getenv("IGDB_CLIENT_SECRET")
 
 app = FastAPI(title="Game Collector API", version="1.0")
+models.Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class GameResponse(BaseModel):
     id: int
