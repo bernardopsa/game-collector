@@ -1,0 +1,79 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
+import httpx
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+CLIENT_ID = os.getenv("IGDB_CLIENT_ID")
+CLIENT_SECRET = os.getenv("IGDB_CLIENT_SECRET")
+
+app = FastAPI(title="Game Collector API", version="1.0")
+
+class GameResponse(BaseModel):
+    id: int
+    name: str
+    cover_url: Optional[str] = None
+    release_date: Optional[str] = None
+    platforms: List[str] = []
+
+    @classmethod
+    def from_igdb(cls, data: dict):
+
+        cover = None
+        if "cover" in data and "url" in data["cover"]:
+            cover = "https:" + data["cover"]["url"].replace("t_thumb", "t_cover_big")
+        
+        release = None
+        if "first_release_date" in data:
+            release = datetime.fromtimestamp(data["first_release_date"]).strftime("%Y-%m-%d")
+            
+        plats = [p["name"] for p in data.get("platforms", [])]
+
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            cover_url=cover,
+            release_date=release,
+            platforms=plats
+        )
+
+def get_token_twitch():
+    url = "https://id.twitch.tv/oauth2/token"
+    params = {"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "grant_type": "client_credentials"}
+    res = httpx.post(url, params=params)
+    res.raise_for_status()
+    return res.json().get("access_token")
+
+@app.get("/api/games/search", response_model=List[GameResponse])
+def search_games(query: str):
+    try:
+        token = get_token_twitch()
+        url_igdb = "https://api.igdb.com/v4/games"
+        headers = {
+            "Client-ID": CLIENT_ID,
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        }
+        
+        body = f"""
+            search "{query}";
+            fields name, cover.url, platforms.name, first_release_date, game_type;
+            where game_type = 0;
+            limit 10;
+        """
+        
+        response = httpx.post(url_igdb, headers=headers, content=body)
+        response.raise_for_status()
+        
+        data = response.json()
+
+        clean_game_data = [GameResponse.from_igdb(jogo) for jogo in data]
+        
+        return clean_game_data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
