@@ -66,6 +66,12 @@ class GameCreate(BaseModel):
     cover_url: Optional[str] = None
     release_date: Optional[str] = None
     platforms: List[str] = []
+    collection_type: str
+    media_platform: str
+    edition: str
+    condition: Optional[str] = None
+    min_price: Optional[str] = None
+    max_price: Optional[str] = None
 
     @classmethod
     def from_igdb(cls, data: dict):
@@ -106,12 +112,7 @@ def search_games(query: str):
             "Accept": "application/json"
         }
         
-        body = f"""
-            search "{query}";
-            fields name, cover.url, platforms.name, first_release_date, game_type;
-            where game_type = 0;
-            limit 10;
-        """
+        body = f'search "{query}"; fields id, name, cover.url, first_release_date, platforms.name; where game_type = 0 & version_parent = null & parent_game = null; limit 20;'
         
         response = httpx.post(url_igdb, headers=headers, content=body)
         response.raise_for_status()
@@ -129,7 +130,6 @@ def search_games(query: str):
     
 @app.post("/api/games")
 def save_game(game: GameCreate, db: Session = Depends(get_db)):
-
     db_game = db.query(models.Game).filter(models.Game.igdb_id == game.igdb_id).first()
     if db_game:
         raise HTTPException(status_code=400, detail="Este jogo já está no seu catálogo.")
@@ -141,7 +141,13 @@ def save_game(game: GameCreate, db: Session = Depends(get_db)):
         title=game.name,
         cover_url=game.cover_url,
         release_date=game.release_date,
-        platforms=plataformas_str
+        platforms=plataformas_str,
+        collection_type=game.collection_type,
+        media_platform=game.media_platform,
+        edition=game.edition,
+        condition=game.condition,
+        min_price=game.min_price,
+        max_price=game.max_price
     )
     
     db.add(new_game)
@@ -166,3 +172,22 @@ def remove_game(game_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": "Jogo removido da coleção com sucesso!"}
+
+@app.get("/api/games/{game_id}/editions")
+def get_game_editions(game_id: int):
+    try:
+        token = get_token_twitch()
+        url_igdb = "https://api.igdb.com/v4/games"
+        headers = {
+            "Client-ID": CLIENT_ID,
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        }
+        
+        body = f'fields id, name; where version_parent = {game_id} | parent_game = {game_id}; limit 50;'
+        response = httpx.post(url_igdb, headers=headers, content=body)
+        response.raise_for_status()
+        
+        return response.json()
+    except Exception:
+        return []
