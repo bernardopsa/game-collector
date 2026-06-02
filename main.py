@@ -152,6 +152,17 @@ def save_game(game: GameCreate, db: Session = Depends(get_db)):
 
 @app.get("/api/games")
 def get_my_games(db: Session = Depends(get_db)):
-    """Retorna todos os jogos salvos na coleção local."""
-    jogos = db.query(models.Game).all()
-    return jogos
+    games = db.query(models.Game).all()
+    return games
+
+@app.delete("/api/games/{game_id}")
+def remove_game(game_id: int, db: Session = Depends(get_db)):
+    db_game = db.query(models.Game).filter(models.Game.id == game_id).first()
+    
+    if not db_game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado.")
+    
+    db.delete(db_game)
+    db.commit()
+    
+    return {"message": "Jogo removido da coleção com sucesso!"}
