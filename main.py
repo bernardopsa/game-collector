@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
@@ -26,6 +26,13 @@ def get_db():
 
 class GameResponse(BaseModel):
     id: int
+    name: str
+    cover_url: Optional[str] = None
+    release_date: Optional[str] = None
+    platforms: List[str] = []
+
+class GameCreate(BaseModel):
+    igdb_id: int
     name: str
     cover_url: Optional[str] = None
     release_date: Optional[str] = None
@@ -88,3 +95,26 @@ def search_games(query: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/games")
+def save_game(game: GameCreate, db: Session = Depends(get_db)):
+
+    db_game = db.query(models.Game).filter(models.Game.igdb_id == game.igdb_id).first()
+    if db_game:
+        raise HTTPException(status_code=400, detail="Este jogo já está no seu catálogo.")
+    
+    plataformas_str = ",".join(game.platforms) if game.platforms else ""
+    
+    new_game = models.Game(
+        igdb_id=game.igdb_id,
+        title=game.name,
+        cover_url=game.cover_url,
+        release_date=game.release_date,
+        platforms=plataformas_str
+    )
+    
+    db.add(new_game)
+    db.commit()
+    db.refresh(new_game)
+    
+    return {"message": "Jogo guardado com sucesso!", "game_id": new_game.id}
