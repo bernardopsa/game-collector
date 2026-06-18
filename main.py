@@ -9,6 +9,7 @@ import models
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+import time
 
 load_dotenv()
 
@@ -197,3 +198,77 @@ def get_game_editions(game_id: int):
         return response.json()
     except Exception:
         return []
+
+@app.get("/api/home")
+def get_home_data():
+    try:
+        token = get_token_twitch()
+        url_igdb = "https://api.igdb.com/v4/games"
+        headers = {
+            "Client-ID": CLIENT_ID,
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        }
+        
+        now = int(time.time())
+        three_months_ago = now - (90 * 24 * 60 * 60)
+        
+        # Filtro Proxy Mídia Física
+        physical_platforms = "(48, 167, 130, 49, 169)"
+        
+        # Query 1: Lançamentos Recentes
+        query_recent = f"""
+            fields id, name, cover.url, first_release_date, platforms.name; 
+            where game_type = 0 & platforms = {physical_platforms} 
+            & first_release_date >= {three_months_ago} & first_release_date <= {now}; 
+            sort total_rating_count desc; 
+            limit 10;
+        """
+        
+        # Query 2: Pré-vendas
+        query_upcoming = f"""
+            fields id, name, cover.url, first_release_date, platforms.name; 
+            where game_type = 0 & platforms = {physical_platforms} 
+            & first_release_date > {now}; 
+            sort hypes desc; 
+            limit 10;
+        """
+        
+        res_recent = httpx.post(url_igdb, headers=headers, content=query_recent)
+        res_upcoming = httpx.post(url_igdb, headers=headers, content=query_upcoming)
+        
+        recent_games = [GameResponse.from_igdb(jogo).model_dump() for jogo in res_recent.json()] if res_recent.status_code == 200 else []
+        upcoming_games = [GameResponse.from_igdb(jogo).model_dump() for jogo in res_upcoming.json()] if res_upcoming.status_code == 200 else []
+
+        return {
+            "recentes": recent_games,
+            "prevendas": upcoming_games
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"recentes": [], "prevendas": []}
+    
+@app.get("/api/games/db/{game_id}", response_model=GameResponse)
+def get_game_by_id(game_id: int):
+    try:
+        token = get_token_twitch()
+        url_igdb = "https://api.igdb.com/v4/games"
+        headers = {
+            "Client-ID": CLIENT_ID,
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json"
+        }
+        
+        body = f"fields id, name, cover.url, first_release_date, platforms.name; where id = {game_id};"
+        response = httpx.post(url_igdb, headers=headers, content=body)
+        response.raise_for_status()
+        
+        data = response.json()
+        if not data:
+            raise HTTPException(status_code=404, detail="Jogo não encontrado")
+            
+        return GameResponse.from_igdb(data[0])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
