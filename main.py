@@ -4,12 +4,16 @@ from typing import List, Optional
 from datetime import datetime
 import httpx
 import os
+import re
 from dotenv import load_dotenv
 import models
 from database import engine, SessionLocal
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import time
+from bs4 import BeautifulSoup
+import urllib.parse
+import cloudscraper
 
 load_dotenv()
 
@@ -272,3 +276,118 @@ def get_game_by_id(game_id: int):
         return GameResponse.from_igdb(data[0])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/scrape/mercadolivre")
+def scrape_mercadolivre(game_name: str, platform: str):
+    try:
+        base_name = game_name.split(":")[0].strip()
+        
+        # 1. Mapeamento Inteligente e Lista de Inimigos
+        platform_map = {
+            "PlayStation 5": {"search": "PS5", "block": ["ps4", "ps3", "xbox", "switch", "nintendo", "pc"]},
+            "PlayStation 4": {"search": "PS4", "block": ["ps5", "ps3", "xbox", "switch", "nintendo", "pc"]},
+            "PlayStation 3": {"search": "PS3", "block": ["ps5", "ps4", "xbox", "switch", "nintendo", "pc"]},
+            "Xbox Series X|S": {"search": "Xbox Series", "block": ["ps5", "ps4", "ps3", "360", "switch", "nintendo", "pc"]},
+            "Xbox One": {"search": "Xbox One", "block": ["ps5", "ps4", "ps3", "360", "switch", "nintendo", "pc"]},
+            "Nintendo Switch": {"search": "Switch", "block": ["ps5", "ps4", "ps3", "xbox", "pc"]}
+        }
+        
+        plat_info = platform_map.get(platform, {"search": platform, "block": []})
+        mapped_platform = plat_info["search"]
+        wrong_platforms = plat_info["block"]
+        
+        search_term = f"{base_name} {mapped_platform} fisico"
+        query = urllib.parse.quote(search_term.replace(" ", "-"))
+        url = f"https://lista.mercadolivre.com.br/{query}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+            "Referer": "https://www.google.com/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        }
+        
+        response = httpx.get(url, headers=headers, timeout=15.0, follow_redirects=True)
+        
+        if response.status_code != 200:
+            return []
+            
+        soup = BeautifulSoup(response.text, 'lxml')
+        valid_results = []
+        
+        items = soup.find_all('li', class_=lambda c: c and 'ui-search-layout__item' in c)
+        if not items:
+            items = soup.find_all('div', class_=lambda c: c and 'ui-search-result__wrapper' in c)
+
+        keywords = base_name.lower().split()
+        
+        # 2. Anti-Lixo
+        trash_words = [
+            "digital", "conta", "offline", "secundaria", "primaria", "primária", "secundária",
+            "código", "codigo", "25 digitos", "aluguel", "vaga", "compartilhada",
+            "poster", "quadro", "adesivo", "brinde", "pdf", "caneca", "camisa", "placa", "moldura"
+        ]
+
+        for item in items[:25]:
+            title_el = item.find(['h2', 'h3'], class_=lambda c: c and 'title' in c)
+            price_el = item.find('span', class_=lambda c: c and 'fraction' in c)
+            link_el = item.find('a', href=True)
+            img_el = item.find('img')
+            
+            if title_el and price_el and link_el:
+                title_text = title_el.text.strip()
+                title_lower = title_text.lower()
+                
+                # REQUISITO 1:  Jogo
+                if not all(kw in title_lower for kw in keywords):
+                    continue
+                    
+                # REQUISITO 2: Mídia Física
+                if any(trash in title_lower for trash in trash_words):
+                    continue
+                    
+                # REQUISITO 3: Plataforma
+                if any(wrong_plat in title_lower for wrong_plat in wrong_platforms):
+                    continue
+                        
+                # REQUISITO 4: Título
+                titulo_sem_console = re.sub(r'playstation \d|ps\d|xbox|nintendo|switch', '', title_lower)
+                titulo_formatado = f" {titulo_sem_console.replace(':', ' ')} "
+                nome_base_formatado = f" {base_name.lower()} "
+                
+                numeracoes = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "ii", "iii", "iv", "v", "vi"]
+                eh_sequencia = False
+                
+                for num in numeracoes:
+                    palavra_num = f" {num} "
+                    if palavra_num in titulo_formatado and palavra_num not in nome_base_formatado:
+                        eh_sequencia = True
+                        break
+                        
+                if eh_sequencia:
+                    continue
+                    
+                price_str = price_el.text.strip()
+                numeric_price = int(price_str.replace(".", ""))
+                
+                valid_results.append({
+                    "title": title_text,
+                    "price": price_str,
+                    "numeric_price": numeric_price,
+                    "link": link_el['href'],
+                    "image": img_el.get('data-src') or img_el.get('src') if img_el else None,
+                    "store": "Mercado Livre"
+                })
+                
+        valid_results.sort(key=lambda x: x["numeric_price"])
+        
+        final_results = []
+        for res in valid_results[:3]:
+            res.pop("numeric_price")
+            final_results.append(res)
+                
+        print(f"Googlebot Fake | Buscando: {search_term} | Encontrados: {len(final_results)} após super filtro")
+        return final_results
+
+    except Exception as e:
+        print(f"Erro no scraping: {e}")
+        return []
