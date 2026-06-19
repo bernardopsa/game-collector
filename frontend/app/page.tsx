@@ -94,7 +94,7 @@ function GameShelf({ title, games, loading, isPlaceholder = false }: { title: st
         {games.slice(0, 5).map((game) => (
           <Link 
             key={game.id} 
-            href={`/jogos/${game.id}`}
+            href={`/jogos/${game.slug}`}
             className="bg-zinc-900 rounded-xl overflow-hidden border border-zinc-800 relative group aspect-[3/4] cursor-pointer block"
           >
             {game.cover_url ? (
